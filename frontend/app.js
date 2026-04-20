@@ -126,11 +126,24 @@ function protocolStack(layers) {
   var parts = [];
   if (layers.L2_DataLink) parts.push({ label: "eth", color: "#fca5a5" });
   if (layers.L3_Network) parts.push({ label: "ip", color: "#fcd34d" });
-  if (layers.L4_Transport)
-    parts.push({
-      label: (layers.L4_Transport.protocol || "tcp").toLowerCase(),
-      color: "#86efac",
-    });
+  if (layers.L4_Transport) {
+    var proto = (layers.L4_Transport.protocol || "tcp").toLowerCase();
+    var flags = layers.L4_Transport.flags || "";
+    var flagMap = {
+      S: "SYN",
+      SA: "SYN-ACK",
+      A: "ACK",
+      FA: "FIN-ACK",
+      F: "FIN",
+      R: "RST",
+      RA: "RST-ACK",
+      PA: "PSH-ACK",
+      PA: "PSH-ACK",
+    };
+    var flagLabel = flagMap[flags] || (flags ? flags : null);
+    var label = flagLabel ? proto + "[" + flagLabel + "]" : proto;
+    parts.push({ label: label, color: "#86efac" });
+  }
   if (layers.L5_L6_Session_Presentation)
     parts.push({ label: "tls", color: "#67e8f9" });
   if (layers.L7_Application) {
