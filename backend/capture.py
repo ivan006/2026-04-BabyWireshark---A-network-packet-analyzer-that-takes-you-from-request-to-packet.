@@ -161,6 +161,7 @@ def capture_and_request(resolved: dict, on_packet, on_done):
     scheme = resolved["scheme"]
 
     captured = []
+    raw_packets = []
     stop_event = threading.Event()
     _current_stop_event = stop_event
 
@@ -171,6 +172,7 @@ def capture_and_request(resolved: dict, on_packet, on_done):
         parsed = parse_packet(pkt)
         if parsed:
             captured.append(parsed)
+            raw_packets.append(pkt)
             on_packet(parsed)
 
     def do_sniff():
@@ -235,6 +237,7 @@ def capture_and_request(resolved: dict, on_packet, on_done):
                     captured[idx]["layers"]["L5_L6_Session_Presentation"] = {}
                 captured[idx]["layers"]["L5_L6_Session_Presentation"]["decrypted_preview"] = content
     except Exception as e:
-        print(f"Decryption failed: {e}")
+        import traceback
+        print(f"Decryption failed: {traceback.format_exc()}")
 
     on_done(captured)
