@@ -1,16 +1,20 @@
 import threading
+import time
 import requests
 from scapy.all import sniff, IP, TCP, UDP, Ether, Raw
 from scapy.layers.tls.record import TLS
 
+# Module-level sniffer tracker — ensures previous capture is killed before starting new one
+_current_stop_event = None
+_current_sniffer = None
 
-def parse_packet(pkt) -> dict | None:
+
+def parse_packet(pkt):
     if not pkt.haslayer(IP):
         return None
 
     layers = {}
 
-    # L2 - Data Link
     if pkt.haslayer(Ether):
         eth = pkt[Ether]
         layers["L2_DataLink"] = {
@@ -20,7 +24,6 @@ def parse_packet(pkt) -> dict | None:
             "ethertype": hex(eth.type),
         }
 
-    # L3 - Network
     ip = pkt[IP]
     layers["L3_Network"] = {
         "protocol": "IPv4",
@@ -33,7 +36,6 @@ def parse_packet(pkt) -> dict | None:
         "fragment_offset": ip.frag,
     }
 
-    # L4 - Transport
     if pkt.haslayer(TCP):
         tcp = pkt[TCP]
         layers["L4_Transport"] = {
@@ -57,7 +59,6 @@ def parse_packet(pkt) -> dict | None:
             "checksum": hex(udp.chksum),
         }
 
-    # L5/L6 - Session / Presentation (TLS)
     if pkt.haslayer(TLS):
         tls = pkt[TLS]
         layers["L5_L6_Session_Presentation"] = {
@@ -66,7 +67,6 @@ def parse_packet(pkt) -> dict | None:
             "version": hex(tls.version) if hasattr(tls, "version") else "unknown",
         }
 
-    # L7 - Application (raw payload)
     if pkt.haslayer(Raw):
         raw = pkt[Raw].load
         try:
@@ -89,12 +89,21 @@ def parse_packet(pkt) -> dict | None:
 
 
 def capture_and_request(resolved: dict, on_packet, on_done):
+    global _current_stop_event, _current_sniffer
+
+    # Kill any previous sniffer still running
+    if _current_stop_event is not None:
+        _current_stop_event.set()
+    if _current_sniffer is not None and _current_sniffer.is_alive():
+        _current_sniffer.join(timeout=5)
+
     ip = resolved["ip"]
     port = resolved["port"]
     url = resolved["url"]
 
     captured = []
     stop_event = threading.Event()
+    _current_stop_event = stop_event
 
     def packet_handler(pkt):
         parsed = parse_packet(pkt)
@@ -112,18 +121,19 @@ def capture_and_request(resolved: dict, on_packet, on_done):
         )
 
     sniffer = threading.Thread(target=do_sniff, daemon=True)
+    _current_sniffer = sniffer
     sniffer.start()
 
-    # Small delay to let sniffer initialise before request fires
-    import time
-    time.sleep(0.3)
+    # Wait for sniffer to initialise before firing request
+    time.sleep(0.5)
 
     try:
         requests.get(url, timeout=10, verify=(port == 443))
-    except Exception as e:
+    except Exception:
         pass
 
-    time.sleep(1)
+    # Wait for trailing packets then stop
+    time.sleep(1.5)
     stop_event.set()
     sniffer.join(timeout=5)
     on_done(captured)
