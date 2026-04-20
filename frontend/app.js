@@ -412,6 +412,38 @@ function addTableRow(pkt, idx) {
   tbody.appendChild(tr);
 }
 
+function showDecryptedPanel(decrypted) {
+  var existing = document.getElementById("decrypted-panel");
+  if (existing) existing.remove();
+
+  var panel = document.createElement("div");
+  panel.id = "decrypted-panel";
+  panel.style.cssText =
+    "margin-top:16px;border:1px solid rgba(134,239,172,0.3);border-radius:8px;overflow:hidden";
+
+  var header = document.createElement("div");
+  header.style.cssText =
+    "padding:10px 14px;background:rgba(134,239,172,0.08);display:flex;align-items:center;gap:8px;cursor:pointer";
+  header.innerHTML =
+    '<span style="font-size:12px;font-weight:600;color:#86efac">Decrypted response body</span><span style="font-size:11px;color:#64748b">tshark + SSLKEYLOGFILE</span>';
+
+  var pre = document.createElement("pre");
+  pre.style.cssText =
+    "margin:0;padding:14px;font-size:11px;color:#e2e8f0;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;background:rgba(0,0,0,0.3)";
+  pre.textContent = decrypted;
+
+  var body = document.createElement("div");
+  body.appendChild(pre);
+
+  header.onclick = function () {
+    body.style.display = body.style.display === "none" ? "block" : "none";
+  };
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  document.getElementById("packets-table").after(panel);
+}
+
 function startInspect() {
   var url = document.getElementById("url-input").value.trim();
   if (!url) return;
@@ -425,6 +457,8 @@ function startInspect() {
   document.getElementById("packets-tbody").innerHTML = "";
   document.getElementById("resolved-info").classList.add("d-none");
   document.getElementById("packets-table").classList.add("d-none");
+  var dp = document.getElementById("decrypted-panel");
+  if (dp) dp.remove();
 
   var btn = document.getElementById("inspect-btn");
   btn.disabled = true;
@@ -456,16 +490,24 @@ function startInspect() {
       document.getElementById("packets-table").classList.remove("d-none");
       addTableRow(msg.data, idx);
     } else if (msg.type === "patch") {
-      if (allPackets[msg.idx]) {
-        if (!allPackets[msg.idx].layers.L7_Application)
-          allPackets[msg.idx].layers.L7_Application = {};
-        allPackets[msg.idx].layers.L7_Application.decrypted_payload =
-          msg.decrypted;
-        // Mark row in table as having decrypted content
-        var row = document.querySelector(
-          "#packets-tbody tr:nth-child(" + (msg.idx + 1) + ")",
-        );
-        if (row) row.style.borderLeft = "2px solid #86efac";
+      console.log(
+        "patch received",
+        msg.idx,
+        msg.decrypted ? msg.decrypted.slice(0, 50) : "empty",
+      );
+      if (msg.idx === null || msg.idx === undefined) {
+        showDecryptedPanel(msg.decrypted);
+      } else {
+        if (allPackets[msg.idx]) {
+          if (!allPackets[msg.idx].layers.L7_Application)
+            allPackets[msg.idx].layers.L7_Application = {};
+          allPackets[msg.idx].layers.L7_Application.decrypted_payload =
+            msg.decrypted;
+          var row = document.querySelector(
+            "#packets-tbody tr:nth-child(" + (msg.idx + 1) + ")",
+          );
+          if (row) row.style.borderLeft = "2px solid #86efac";
+        }
       }
     } else if (msg.type === "done") {
       setStatus(

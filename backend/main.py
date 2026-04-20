@@ -1,3 +1,6 @@
+import os, tempfile
+os.environ["SSLKEYLOGFILE"] = os.path.join(tempfile.gettempdir(), "babywireshark_keylog.txt")
+
 import json
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -32,7 +35,6 @@ async def inspect(ws: WebSocket):
             await ws.close()
             return
 
-        # Resolve DNS
         try:
             resolved = resolve(url)
         except Exception as e:
@@ -46,24 +48,28 @@ async def inspect(ws: WebSocket):
         packet_queue = asyncio.Queue()
 
         def on_packet(pkt):
-            asyncio.run_coroutine_threadsafe(packet_queue.put(pkt), loop)
+            asyncio.run_coroutine_threadsafe(packet_queue.put(("packet", pkt)), loop)
 
         def on_done(all_packets):
-            asyncio.run_coroutine_threadsafe(packet_queue.put(None), loop)
+            asyncio.run_coroutine_threadsafe(packet_queue.put(("done", None)), loop)
 
-        # Run capture in thread (needs root)
-        executor.submit(capture_and_request, resolved, on_packet, on_done)
+        def on_patch(idx, decrypted):
+            asyncio.run_coroutine_threadsafe(packet_queue.put(("patch", {"idx": idx, "decrypted": decrypted})), loop)
+
+        executor.submit(capture_and_request, resolved, on_packet, on_done, on_patch)
 
         await ws.send_json({"type": "capturing", "message": f"Capturing traffic to {resolved['ip']}:{resolved['port']}"})
 
-        # Stream packets as they arrive
         while True:
-            pkt = await packet_queue.get()
-            if pkt is None:
+            msg = await packet_queue.get()
+            kind, data = msg
+            if kind == "done":
+                await ws.send_json({"type": "done", "message": "Capture complete"})
                 break
-            await ws.send_json({"type": "packet", "data": pkt})
-
-        await ws.send_json({"type": "done", "message": "Capture complete"})
+            elif kind == "packet":
+                await ws.send_json({"type": "packet", "data": data})
+            elif kind == "patch":
+                await ws.send_json({"type": "patch", "idx": data["idx"], "decrypted": data["decrypted"]})
 
     except WebSocketDisconnect:
         pass

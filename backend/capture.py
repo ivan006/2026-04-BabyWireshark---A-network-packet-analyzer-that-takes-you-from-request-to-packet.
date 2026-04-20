@@ -136,7 +136,7 @@ def parse_packet(pkt):
         layers["L7_Application"] = {
             "protocol": "HTTP" if is_http else "HTTPS/TLS encrypted",
             "payload_bytes": len(raw),
-            "payload_preview": decoded[:2000],
+            "payload_preview": decoded,
         }
 
     return {
@@ -232,15 +232,46 @@ def capture_and_request(resolved: dict, on_packet, on_done, on_patch=None):
         from decrypt import decrypt_packets_with_tshark
         decrypted_map = decrypt_packets_with_tshark(raw_packets, _keylog_path)
         print(f"Total captured: {len(captured)}, decrypted_map keys: {list(decrypted_map.keys())}")
-        for idx, content in decrypted_map.items():
-            if idx < len(captured):
-                if "L7_Application" not in captured[idx]["layers"]:
-                    captured[idx]["layers"]["L7_Application"] = {}
-                captured[idx]["layers"]["L7_Application"]["decrypted_payload"] = content
-                print(f"Attached decrypted content to packet index {idx}")
+        # Get all TLS application data packets (type 23)
+        tls_data_packets = [
+            i for i, pkt in enumerate(captured)
+            if pkt["layers"].get("L5_L6_Session_Presentation", {}).get("type") == 23
+        ]
+
+        for frame_idx, full_content in decrypted_map.items():
+            print(f"Distributing decrypted content ({len(full_content)} chars) across {len(tls_data_packets)} TLS data packets")
+
+            if not tls_data_packets:
                 if on_patch:
-                    on_patch(idx, content)
+                    on_patch(None, full_content)
+                continue
+
+            # Get sizes of each TLS data packet to proportion the content
+            sizes = [captured[i]["size_bytes"] for i in tls_data_packets]
+            total_size = sum(sizes)
+            total_chars = len(full_content)
+
+            pos = 0
+            for i, pkt_idx in enumerate(tls_data_packets):
+                chunk_size = int((sizes[i] / total_size) * total_chars)
+                if i == len(tls_data_packets) - 1:
+                    chunk = full_content[pos:]  # last packet gets remainder
+                else:
+                    chunk = full_content[pos:pos + chunk_size]
+                pos += chunk_size
+
+                if "L7_Application" not in captured[pkt_idx]["layers"]:
+                    captured[pkt_idx]["layers"]["L7_Application"] = {}
+                captured[pkt_idx]["layers"]["L7_Application"]["decrypted_payload"] = chunk
+                if on_patch:
+                    print(f'sending patch for pkt {pkt_idx}')
+                    on_patch(pkt_idx, chunk)
+
+            if on_patch:
+                on_patch(None, full_content)  # also send full content for summary panel
+
     except Exception as e:
         print(f"Decryption failed: {e}")
 
+    print('calling on_done now')
     on_done(captured)

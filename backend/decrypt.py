@@ -5,7 +5,6 @@ import json
 
 
 def find_tshark() -> str | None:
-    """Find tshark executable."""
     candidates = [
         r"C:\Program Files\Wireshark\tshark.exe",
         r"C:\Program Files (x86)\Wireshark\tshark.exe",
@@ -21,10 +20,6 @@ def find_tshark() -> str | None:
 
 
 def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
-    """
-    Write captured packets to a temp pcap, run tshark with the keylog,
-    return a dict of {packet_index: decrypted_http_payload}.
-    """
     if not os.path.exists(keylog_path):
         return {}
 
@@ -33,66 +28,55 @@ def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
         return {}
 
     try:
-        from scapy.all import wrpcap, Ether, IP, TCP, Raw
-        import struct
-
-        # Write raw packets to temp pcap
+        from scapy.all import wrpcap
         pcap_path = os.path.join(tempfile.gettempdir(), "babywireshark_capture.pcap")
         wrpcap(pcap_path, packets)
 
-        # Run tshark to decrypt and extract HTTP2/HTTP data
+        # Extract full reassembled HTTP response body
         result = subprocess.run([
             tshark,
             "-r", pcap_path,
             "-o", f"tls.keylog_file:{keylog_path}",
             "-T", "json",
-            "-Y", "http2 or http",
             "-e", "frame.number",
-            "-e", "http2.data.data",
-            "-e", "http.file_data",
-            "-e", "http2.headers",
-            "-e", "http.request.full_uri",
             "-e", "http.response.code",
-        ], capture_output=True, text=True, timeout=30)
+            "-e", "http.response_for.uri",
+            "-e", "http.file_data",
+            "-e", "http2.data.data",
+            "-e", "http.response",
+            "-Y", "http.file_data or http2.data.data",
+        ], capture_output=True, timeout=30, encoding="utf-8", errors="replace")
 
-        print(f"tshark stderr: {result.stderr[:500]}")
-        print(f"tshark stdout length: {len(result.stdout)}")
-        print(f"tshark stdout preview: {result.stdout[:500]}")
-        if not result.stdout.strip():
+        output = result.stdout.strip()
+        if not output:
+            print("tshark returned no HTTP data")
             return {}
 
-        data = json.loads(result.stdout)
-        decrypted = {}
+        data = json.loads(output)
+        full_response = ""
 
         for entry in data:
-            # frame.number is 1-based index in the pcap
-            frame_num = int(entry.get("_source", {}).get("layers", {}).get("frame.number", [0])[0]) - 1
             layers = entry.get("_source", {}).get("layers", {})
+            for key in ["http.file_data", "http2.data.data"]:
+                if key in layers:
+                    vals = layers[key]
+                    if not isinstance(vals, list):
+                        vals = [vals]
+                    for val in vals:
+                        try:
+                            chunk = bytes.fromhex(val.replace(":", "").replace(" ", "")).decode("utf-8", errors="replace")
+                            full_response += chunk
+                        except Exception:
+                            pass
 
-            content = ""
-            if "http2.data.data" in layers:
-                hex_data = layers["http2.data.data"]
-                if isinstance(hex_data, list):
-                    hex_data = hex_data[0]
-                try:
-                    content = bytes.fromhex(hex_data.replace(":", "")).decode("utf-8", errors="replace")
-                except Exception:
-                    content = hex_data
-            elif "http.file_data" in layers:
-                hex_data = layers["http.file_data"]
-                if isinstance(hex_data, list):
-                    hex_data = hex_data[0]
-                try:
-                    content = bytes.fromhex(hex_data.replace(":", "")).decode("utf-8", errors="replace")
-                except Exception:
-                    content = str(hex_data)
+        if not full_response:
+            print("No HTTP body found in tshark output")
+            return {}
 
-            if content:
-                decrypted[frame_num] = content[:2000]
-                print(f"Decrypted frame {frame_num+1}: {content[:100]}")
-
-        return decrypted
+        print(f"Total decrypted: {len(full_response)} chars")
+        return {len(packets) - 1: full_response}
 
     except Exception as e:
-        print(f"tshark decryption error: {e}")
+        import traceback
+        print(f"tshark error: {traceback.format_exc()}")
         return {}
