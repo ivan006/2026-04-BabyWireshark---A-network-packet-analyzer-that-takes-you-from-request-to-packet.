@@ -104,7 +104,6 @@ def capture_and_request(resolved: dict, on_packet, on_done):
 
     def do_sniff():
         sniff(
-            iface=r'\Device\NPF_{DA5D51D8-74CD-4BF3-98E0-09575A6465CB}',
             filter=f"host {ip} and port {port}",
             prn=packet_handler,
             store=False,
