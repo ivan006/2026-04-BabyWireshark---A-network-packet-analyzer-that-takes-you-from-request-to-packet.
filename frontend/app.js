@@ -102,7 +102,7 @@ function packetNarrative(pkt) {
   if (flags === "S") return '"yo, you there? I\'d like to connect" -- SYN';
   if (flags === "SA") return '"yeah I\'m here, come through" -- SYN-ACK';
   if (flags === "A" && !t.L5_L6_Session_Presentation && !t.L7_Application)
-    return '"cool, we\'re connected" -- ACK';
+    return '"thanks" -- ACK';
   if (tlsType === 22 && isFromMe)
     return '"before we talk, let\'s agree on how to encrypt this" -- Client Hello';
   if (tlsType === 22 && !isFromMe)
