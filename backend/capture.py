@@ -4,7 +4,8 @@ import requests
 from scapy.all import sniff, IP, TCP, UDP, Ether, Raw
 from scapy.layers.tls.record import TLS
 
-IFACE = r'\Device\NPF_{DA5D51D8-74CD-4BF3-98E0-09575A6465CB}'
+from scapy.all import conf as _scapy_conf
+IFACE = _scapy_conf.iface
 
 _current_stop_event = None
 _current_sniffer = None
