@@ -109,21 +109,44 @@ function packetNarrative(pkt) {
     return '"agreed, here\'s my certificate to prove who I am" -- Server Hello';
   if (tlsType === 20)
     return '"switching to encrypted mode now" -- ChangeCipherSpec';
-  if (tlsType === 23 && isFromMe)
-    return "\"here's my request, you can't read it\" -- Application Data";
-  if (tlsType === 23 && !isFromMe)
-    return '"here\'s my response, also encrypted" -- Application Data';
+  if (tlsType === 23 && isFromMe) {
+    _requestPartCounter++;
+    var rqLabel =
+      _requestPartCounter === 1
+        ? "sending my request, encrypted"
+        : "sending part " + _requestPartCounter + " of my request, encrypted";
+    return '"' + rqLabel + '" -- Application Data';
+  }
+  if (tlsType === 23 && !isFromMe) {
+    _responsePartCounter++;
+    var rsLabel =
+      _responsePartCounter === 1
+        ? "here's the file you requested"
+        : "here's part " + _responsePartCounter + " of the file";
+    return '"' + rsLabel + ', encrypted obviously" -- Application Data';
+  }
   if (tlsType === 21) return '"alright I\'m done talking" -- TLS Alert';
   if (flags.indexOf("F") >= 0 && isFromMe)
-    return '"I\'m done sending, close your end too" -- FIN';
+    return '"got your FIN, closing my end too" -- FIN-ACK';
   if (flags.indexOf("F") >= 0 && !isFromMe)
-    return '"same, I\'m done too" -- FIN';
+    return '"I\'m done, close your end when ready" -- FIN';
   if (flags.indexOf("R") >= 0)
     return '"connection closed abruptly -- normal for scripted HTTP clients" -- RST';
   if (t.L7_Application) {
-    if (isFromMe)
-      return '"here\'s my request -- see attached" -- Application Data';
-    return '"here\'s my response -- see attached" -- Application Data';
+    if (isFromMe) {
+      _requestPartCounter++;
+      var rqL =
+        _requestPartCounter === 1
+          ? "here's my request"
+          : "here's part " + _requestPartCounter + " of my request";
+      return '"' + rqL + ' -- see attached" -- Application Data';
+    }
+    _responsePartCounter++;
+    var rsL =
+      _responsePartCounter === 1
+        ? "here's the file you requested"
+        : "here's part " + _responsePartCounter + " of the file";
+    return '"' + rsL + ' -- see attached" -- Application Data';
   }
   return '"just keeping track of where we are" -- TCP control';
 }
@@ -272,14 +295,8 @@ function openModal(idx) {
   });
 
   if (payloadContent) {
-    html += '<div class="mb-3">';
     html +=
-      '<div class="fw-semibold small mb-2" style="color:#f59e0b">Payload</div>';
-    html +=
-      '<pre style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:11px;color:#e2e8f0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto">' +
-      payloadContent +
-      "</pre>";
-    html += "</div>";
+      '<div class="mb-3"><div class="fw-semibold small mb-2" style="color:#f59e0b">Payload</div><div id="payload-placeholder"></div></div>';
   }
 
   var titleHtml =
@@ -306,6 +323,14 @@ function openModal(idx) {
     pkt.size_bytes + " bytes -- " + elapsed;
 
   new bootstrap.Modal(document.getElementById("pktModal")).show();
+  if (payloadContent) {
+    var pre = document.createElement("pre");
+    pre.style.cssText =
+      "background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:11px;color:#e2e8f0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto";
+    pre.textContent = payloadContent;
+    var placeholder = document.getElementById("payload-placeholder");
+    if (placeholder) placeholder.replaceWith(pre);
+  }
 }
 
 function getSender(pkt) {
@@ -380,6 +405,8 @@ function startInspect() {
   startTime = null;
   allPackets = [];
   resetPhaseState();
+  _responsePartCounter = 0;
+  _requestPartCounter = 0;
   document.getElementById("packets-tbody").innerHTML = "";
   document.getElementById("resolved-info").classList.add("d-none");
   document.getElementById("packets-table").classList.add("d-none");

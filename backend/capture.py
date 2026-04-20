@@ -70,17 +70,68 @@ def parse_packet(pkt):
         }
 
     if pkt.haslayer(Raw):
+        import gzip, re as _re
         raw = pkt[Raw].load
+        is_http = (layers.get("L4_Transport", {}).get("dst_port") == 80
+                   or layers.get("L4_Transport", {}).get("src_port") == 80)
+
+        decoded = None
+
+        # Try to parse as HTTP (headers + body)
         try:
-            decoded = raw.decode("utf-8", errors="replace")
+            text = raw.decode("latin-1")
+            if "\r\n\r\n" in text:
+                header_part, body_part = text.split("\r\n\r\n", 1)
+                is_gzip = "Content-Encoding: gzip" in header_part
+                is_chunked = "Transfer-Encoding: chunked" in header_part
+
+                body_bytes = body_part.encode("latin-1")
+
+                # Strip chunked encoding
+                if is_chunked:
+                    unchunked = b""
+                    remaining = body_bytes
+                    while remaining:
+                        # Find chunk size line
+                        crlf = remaining.find(b"\r\n")
+                        if crlf == -1:
+                            break
+                        size_str = remaining[:crlf].split(b";")[0].strip()
+                        if not size_str:
+                            break
+                        try:
+                            chunk_size = int(size_str, 16)
+                        except Exception:
+                            break
+                        if chunk_size == 0:
+                            break
+                        chunk_data = remaining[crlf + 2: crlf + 2 + chunk_size]
+                        unchunked += chunk_data
+                        remaining = remaining[crlf + 2 + chunk_size + 2:]
+                    body_bytes = unchunked
+
+                # Decompress gzip body
+                if is_gzip and body_bytes:
+                    try:
+                        body_bytes = gzip.decompress(body_bytes)
+                    except Exception:
+                        pass
+
+                body_text = body_bytes.decode("utf-8", errors="replace")
+                decoded = header_part + "\r\n\r\n" + body_text
+            else:
+                decoded = text
         except Exception:
+            pass
+
+        # Fallback to hex
+        if not decoded:
             decoded = raw.hex()
+
         layers["L7_Application"] = {
-            "protocol": "HTTP" if layers.get("L4_Transport", {}).get("dst_port") == 80
-                        or layers.get("L4_Transport", {}).get("src_port") == 80
-                        else "HTTPS/TLS encrypted",
+            "protocol": "HTTP" if is_http else "HTTPS/TLS encrypted",
             "payload_bytes": len(raw),
-            "payload_preview": decoded[:300],
+            "payload_preview": decoded[:2000],
         }
 
     return {
@@ -134,16 +185,29 @@ def capture_and_request(resolved: dict, on_packet, on_done):
     time.sleep(1.0)
 
     try:
-        # Fix 1: force request to exact resolved IP to avoid DNS mismatch
-        url = f"{scheme}://{ip}{resolved['path'] or '/'}"
+        import socket
+        from urllib3.util.connection import create_connection as _orig
+
+        # Force requests to connect to our resolved IP but keep SNI hostname for TLS
+        _resolved_ip = ip
+        _resolved_host = hostname
+
+        def patched_create_connection(address, *args, **kwargs):
+            host, port = address
+            if host == _resolved_host:
+                host = _resolved_ip
+            return _orig((host, port), *args, **kwargs)
+
+        import urllib3.util.connection as _conn_mod
+        _orig_fn = _conn_mod.create_connection
+        _conn_mod.create_connection = patched_create_connection
+
+        url = f"{scheme}://{hostname}{resolved['path'] or '/'}"
         if resolved.get('query'):
             url += f"?{resolved['query']}"
-        requests.get(
-            url,
-            headers={"Host": hostname},
-            timeout=10,
-            verify=(scheme == "https"),
-        )
+        requests.get(url, timeout=10)
+
+        _conn_mod.create_connection = _orig_fn
     except Exception:
         pass
 
