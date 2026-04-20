@@ -65,6 +65,7 @@ def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
         decrypted = {}
 
         for entry in data:
+            # frame.number is 1-based index in the pcap
             frame_num = int(entry.get("_source", {}).get("layers", {}).get("frame.number", [0])[0]) - 1
             layers = entry.get("_source", {}).get("layers", {})
 
@@ -78,12 +79,17 @@ def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
                 except Exception:
                     content = hex_data
             elif "http.file_data" in layers:
-                content = layers["http.file_data"]
-                if isinstance(content, list):
-                    content = content[0]
+                hex_data = layers["http.file_data"]
+                if isinstance(hex_data, list):
+                    hex_data = hex_data[0]
+                try:
+                    content = bytes.fromhex(hex_data.replace(":", "")).decode("utf-8", errors="replace")
+                except Exception:
+                    content = str(hex_data)
 
             if content:
                 decrypted[frame_num] = content[:2000]
+                print(f"Decrypted frame {frame_num+1}: {content[:100]}")
 
         return decrypted
 

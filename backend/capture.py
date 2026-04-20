@@ -146,7 +146,7 @@ def parse_packet(pkt):
     }
 
 
-def capture_and_request(resolved: dict, on_packet, on_done):
+def capture_and_request(resolved: dict, on_packet, on_done, on_patch=None):
     global _current_stop_event, _current_sniffer
 
     # Kill any previous sniffer
@@ -231,13 +231,16 @@ def capture_and_request(resolved: dict, on_packet, on_done):
     try:
         from decrypt import decrypt_packets_with_tshark
         decrypted_map = decrypt_packets_with_tshark(raw_packets, _keylog_path)
+        print(f"Total captured: {len(captured)}, decrypted_map keys: {list(decrypted_map.keys())}")
         for idx, content in decrypted_map.items():
             if idx < len(captured):
-                if "L5_L6_Session_Presentation" not in captured[idx]["layers"]:
-                    captured[idx]["layers"]["L5_L6_Session_Presentation"] = {}
-                captured[idx]["layers"]["L5_L6_Session_Presentation"]["decrypted_preview"] = content
+                if "L7_Application" not in captured[idx]["layers"]:
+                    captured[idx]["layers"]["L7_Application"] = {}
+                captured[idx]["layers"]["L7_Application"]["decrypted_payload"] = content
+                print(f"Attached decrypted content to packet index {idx}")
+                if on_patch:
+                    on_patch(idx, content)
     except Exception as e:
-        import traceback
-        print(f"Decryption failed: {traceback.format_exc()}")
+        print(f"Decryption failed: {e}")
 
     on_done(captured)

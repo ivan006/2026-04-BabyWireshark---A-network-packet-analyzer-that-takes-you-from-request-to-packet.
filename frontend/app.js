@@ -300,11 +300,8 @@ function openModal(idx) {
   }
 
   var decryptedContent = null;
-  if (
-    layers.L5_L6_Session_Presentation &&
-    layers.L5_L6_Session_Presentation.decrypted_preview
-  ) {
-    decryptedContent = layers.L5_L6_Session_Presentation.decrypted_preview;
+  if (layers.L7_Application && layers.L7_Application.decrypted_payload) {
+    decryptedContent = layers.L7_Application.decrypted_payload;
     html +=
       '<div class="mb-3"><div class="fw-semibold small mb-2" style="color:#86efac">Decrypted payload</div><div id="decrypted-placeholder"></div></div>';
   }
@@ -458,6 +455,18 @@ function startInspect() {
       packetCount++;
       document.getElementById("packets-table").classList.remove("d-none");
       addTableRow(msg.data, idx);
+    } else if (msg.type === "patch") {
+      if (allPackets[msg.idx]) {
+        if (!allPackets[msg.idx].layers.L7_Application)
+          allPackets[msg.idx].layers.L7_Application = {};
+        allPackets[msg.idx].layers.L7_Application.decrypted_payload =
+          msg.decrypted;
+        // Mark row in table as having decrypted content
+        var row = document.querySelector(
+          "#packets-tbody tr:nth-child(" + (msg.idx + 1) + ")",
+        );
+        if (row) row.style.borderLeft = "2px solid #86efac";
+      }
     } else if (msg.type === "done") {
       setStatus(
         "Capture complete -- " + packetCount + " packets",

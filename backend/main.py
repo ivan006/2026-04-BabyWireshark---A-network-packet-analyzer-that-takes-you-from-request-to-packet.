@@ -1,6 +1,3 @@
-import os, tempfile
-os.environ["SSLKEYLOGFILE"] = os.path.join(tempfile.gettempdir(), "babywireshark_keylog.txt")
-
 import json
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
