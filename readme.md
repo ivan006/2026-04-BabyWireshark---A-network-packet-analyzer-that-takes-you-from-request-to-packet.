@@ -4,6 +4,8 @@
 
 Enter a URL. BabyWireshark resolves it, captures every packet involved in that request, and displays them organised by OSI layer in real time.
 
+![BabyWireshark in action](readme-img.jpg)
+
 ---
 
 ## Stack
