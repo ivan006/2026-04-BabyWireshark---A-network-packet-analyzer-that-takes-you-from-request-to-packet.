@@ -229,12 +229,17 @@ function openModal(idx) {
   var phaseColor = PHASE_COLORS[phase] || "#aaa";
 
   var html = "";
+  var payloadContent = null;
   LAYERS.forEach(function (l) {
     if (!layers[l.key]) return;
     var fields = "";
     Object.entries(layers[l.key]).forEach(function (entry) {
       var k = entry[0],
         v = entry[1];
+      if (k === "payload_preview") {
+        payloadContent = v;
+        return;
+      }
       var tip = FIELD_TIPS[k] || "";
       var tdStyle =
         "font-size:12px;white-space:nowrap;" +
@@ -265,6 +270,17 @@ function openModal(idx) {
     html += '<table class="w-100"><tbody>' + fields + "</tbody></table>";
     html += '</div><hr class="border-secondary my-2">';
   });
+
+  if (payloadContent) {
+    html += '<div class="mb-3">';
+    html +=
+      '<div class="fw-semibold small mb-2" style="color:#f59e0b">Payload</div>';
+    html +=
+      '<pre style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:12px;font-size:11px;color:#e2e8f0;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto">' +
+      payloadContent +
+      "</pre>";
+    html += "</div>";
+  }
 
   var titleHtml =
     '<span class="me-2" style="font-family:monospace;font-size:13px">#' +
