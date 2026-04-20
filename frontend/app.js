@@ -299,6 +299,16 @@ function openModal(idx) {
       '<div class="mb-3"><div class="fw-semibold small mb-2" style="color:#f59e0b">Payload</div><div id="payload-placeholder"></div></div>';
   }
 
+  var decryptedContent = null;
+  if (
+    layers.L5_L6_Session_Presentation &&
+    layers.L5_L6_Session_Presentation.decrypted_preview
+  ) {
+    decryptedContent = layers.L5_L6_Session_Presentation.decrypted_preview;
+    html +=
+      '<div class="mb-3"><div class="fw-semibold small mb-2" style="color:#86efac">Decrypted payload</div><div id="decrypted-placeholder"></div></div>';
+  }
+
   var titleHtml =
     '<span class="me-2" style="font-family:monospace;font-size:13px">#' +
     (idx + 1) +
@@ -330,6 +340,14 @@ function openModal(idx) {
     pre.textContent = payloadContent;
     var placeholder = document.getElementById("payload-placeholder");
     if (placeholder) placeholder.replaceWith(pre);
+  }
+  if (decryptedContent) {
+    var dpre = document.createElement("pre");
+    dpre.style.cssText =
+      "background:rgba(134,239,172,0.05);border:1px solid rgba(134,239,172,0.2);border-radius:6px;padding:12px;font-size:11px;color:#86efac;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto";
+    dpre.textContent = decryptedContent;
+    var dplaceholder = document.getElementById("decrypted-placeholder");
+    if (dplaceholder) dplaceholder.replaceWith(dpre);
   }
 }
 

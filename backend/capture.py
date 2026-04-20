@@ -7,8 +7,13 @@ from scapy.layers.tls.record import TLS
 from scapy.all import conf as _scapy_conf
 IFACE = _scapy_conf.iface
 
+import tempfile
+import os
+from decrypt import try_decrypt_packet
+
 _current_stop_event = None
 _current_sniffer = None
+_keylog_path = os.path.join(tempfile.gettempdir(), "babywireshark_keylog.txt")
 
 
 def parse_packet(pkt):
@@ -63,11 +68,18 @@ def parse_packet(pkt):
 
     if pkt.haslayer(TLS):
         tls = pkt[TLS]
-        layers["L5_L6_Session_Presentation"] = {
+        tls_info = {
             "protocol": "TLS",
             "type": tls.type,
             "version": hex(tls.version) if hasattr(tls, "version") else "unknown",
         }
+        # Attempt to decrypt TLS application data (type 23)
+        if tls.type == 23 and pkt.haslayer(Raw):
+            raw_tls = bytes(pkt[TLS])
+            decrypted = try_decrypt_packet(raw_tls, _keylog_path)
+            if decrypted:
+                tls_info["decrypted_preview"] = decrypted[:2000]
+        layers["L5_L6_Session_Presentation"] = tls_info
 
     if pkt.haslayer(Raw):
         import gzip, re as _re
@@ -183,6 +195,11 @@ def capture_and_request(resolved: dict, on_packet, on_done):
 
     # Wait for sniffer to be ready
     time.sleep(1.0)
+
+    # Set SSLKEYLOGFILE so Python's ssl module logs session keys
+    os.environ["SSLKEYLOGFILE"] = _keylog_path
+    if os.path.exists(_keylog_path):
+        os.remove(_keylog_path)
 
     try:
         import socket
