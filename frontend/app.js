@@ -92,10 +92,13 @@ function packetNarrative(pkt) {
   var tlsType = t.L5_L6_Session_Presentation
     ? t.L5_L6_Session_Presentation.type
     : null;
+  var srcParts = src.split(".");
   var isFromMe =
     src.indexOf("10.") === 0 ||
     src.indexOf("192.168.") === 0 ||
-    src.indexOf("172.") === 0;
+    (srcParts[0] === "172" &&
+      parseInt(srcParts[1]) >= 16 &&
+      parseInt(srcParts[1]) <= 31);
   if (flags === "S") return '"yo, you there? I\'d like to connect" -- SYN';
   if (flags === "SA") return '"yeah I\'m here, come through" -- SYN-ACK';
   if (flags === "A" && !t.L5_L6_Session_Presentation && !t.L7_Application)
@@ -117,8 +120,11 @@ function packetNarrative(pkt) {
     return '"same, I\'m done too" -- FIN';
   if (flags.indexOf("R") >= 0)
     return '"connection closed abruptly -- normal for scripted HTTP clients" -- RST';
-  if (t.L7_Application)
-    return '"here\'s the data you asked for" -- Application Data';
+  if (t.L7_Application) {
+    if (isFromMe)
+      return '"here\'s my request -- see attached" -- Application Data';
+    return '"here\'s my response -- see attached" -- Application Data';
+  }
   return '"just keeping track of where we are" -- TCP control';
 }
 
@@ -288,10 +294,13 @@ function openModal(idx) {
 
 function getSender(pkt) {
   var src = (pkt.layers.L3_Network && pkt.layers.L3_Network.src_ip) || "";
+  var srcParts = src.split(".");
   var isFromMe =
     src.indexOf("10.") === 0 ||
     src.indexOf("192.168.") === 0 ||
-    src.indexOf("172.") === 0;
+    (srcParts[0] === "172" &&
+      parseInt(srcParts[1]) >= 16 &&
+      parseInt(srcParts[1]) <= 31);
   if (isFromMe) return { name: "you", color: "#86efac" };
   return { name: currentHostname || "server", color: "#67e8f9" };
 }
@@ -322,6 +331,10 @@ function addTableRow(pkt, idx) {
     '">' +
     sender.name +
     "</span></td>";
+  html +=
+    '<td class="pe-4" style="font-size:12px;color:#94a3b8;max-width:320px">' +
+    packetNarrative(pkt) +
+    "</td>";
   html += '<td class="pe-3">' + protocolStack(pkt.layers) + "</td>";
   html +=
     '<td class="pe-3"><span class="badge" style="background:' +
@@ -331,10 +344,6 @@ function addTableRow(pkt, idx) {
     ';font-size:10px;font-weight:500">' +
     phase +
     "</span></td>";
-  html +=
-    '<td class="pe-4" style="font-size:12px;color:#94a3b8;max-width:320px">' +
-    packetNarrative(pkt) +
-    "</td>";
   html +=
     '<td class="text-secondary text-end pe-3" style="font-family:monospace;font-size:12px;white-space:nowrap">' +
     elapsed +
