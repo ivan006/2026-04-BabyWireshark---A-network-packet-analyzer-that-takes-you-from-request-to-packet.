@@ -9,8 +9,6 @@ IFACE = _scapy_conf.iface
 
 import tempfile
 import os
-from decrypt import try_decrypt_packet
-
 _current_stop_event = None
 _current_sniffer = None
 _keylog_path = os.path.join(tempfile.gettempdir(), "babywireshark_keylog.txt")
@@ -73,12 +71,7 @@ def parse_packet(pkt):
             "type": tls.type,
             "version": hex(tls.version) if hasattr(tls, "version") else "unknown",
         }
-        # Attempt to decrypt TLS application data (type 23)
-        if tls.type == 23 and pkt.haslayer(Raw):
-            raw_tls = bytes(pkt[TLS])
-            decrypted = try_decrypt_packet(raw_tls, _keylog_path)
-            if decrypted:
-                tls_info["decrypted_preview"] = decrypted[:2000]
+
         layers["L5_L6_Session_Presentation"] = tls_info
 
     if pkt.haslayer(Raw):
@@ -232,4 +225,16 @@ def capture_and_request(resolved: dict, on_packet, on_done):
     time.sleep(1.5)
     stop_event.set()
     sniffer.join(timeout=5)
+    # Run tshark decryption on all captured packets
+    try:
+        from decrypt import decrypt_packets_with_tshark
+        decrypted_map = decrypt_packets_with_tshark(raw_packets, _keylog_path)
+        for idx, content in decrypted_map.items():
+            if idx < len(captured):
+                if "L5_L6_Session_Presentation" not in captured[idx]["layers"]:
+                    captured[idx]["layers"]["L5_L6_Session_Presentation"] = {}
+                captured[idx]["layers"]["L5_L6_Session_Presentation"]["decrypted_preview"] = content
+    except Exception as e:
+        print(f"Decryption failed: {e}")
+
     on_done(captured)

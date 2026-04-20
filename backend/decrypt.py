@@ -1,93 +1,92 @@
-"""
-TLS decryption using SSLKEYLOGFILE session keys.
-Parses the key log and decrypts TLS application data packets.
-"""
 import os
-import re
-import struct
-from pathlib import Path
+import tempfile
+import subprocess
+import json
 
 
-def parse_keylog(keylog_path: str) -> dict:
-    """Parse NSS key log file into a dict keyed by client_random."""
-    keys = {}
-    try:
-        with open(keylog_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("#") or not line:
-                    continue
-                parts = line.split()
-                if len(parts) == 3:
-                    label, client_random, secret = parts
-                    if client_random not in keys:
-                        keys[client_random] = {}
-                    keys[client_random][label] = bytes.fromhex(secret)
-    except Exception:
-        pass
-    return keys
-
-
-def try_decrypt_packet(raw_payload: bytes, keylog_path: str) -> str | None:
-    """
-    Attempt to decrypt a TLS application data record.
-    Returns decrypted string or None if decryption fails.
-    Uses Python's ssl module via a loopback approach.
-    """
-    if not keylog_path or not os.path.exists(keylog_path):
-        return None
-
-    keys = parse_keylog(keylog_path)
-    if not keys:
-        return None
-
-    # TLS record header: type(1) + version(2) + length(2)
-    if len(raw_payload) < 5:
-        return None
-    record_type = raw_payload[0]
-    if record_type != 23:  # ApplicationData
-        return None
-
-    try:
-        import ssl
-        import cryptography
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        # Minimal TLS 1.3 decryption attempt using CLIENT_TRAFFIC_SECRET_0
-        for client_random, secrets in keys.items():
-            secret = secrets.get("CLIENT_TRAFFIC_SECRET_0") or secrets.get("SERVER_TRAFFIC_SECRET_0")
-            if not secret:
-                continue
-            # Derive key + iv from secret using HKDF (simplified)
-            from cryptography.hazmat.primitives.hashes import SHA256
-            from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
-            from cryptography.hazmat.backends import default_backend
-
-            def hkdf_expand_label(secret, label, context, length):
-                full_label = b"tls13 " + label.encode()
-                hkdf_label = (
-                    struct.pack(">H", length)
-                    + bytes([len(full_label)]) + full_label
-                    + bytes([len(context)]) + context
-                )
-                return HKDFExpand(SHA256(), length, hkdf_label, default_backend()).derive(secret)
-
-            key = hkdf_expand_label(secret, "key", b"", 16)
-            iv = hkdf_expand_label(secret, "iv", b"", 12)
-            ciphertext = raw_payload[5:]
-            aesgcm = AESGCM(key)
-            # Try seq numbers 0-10
-            for seq in range(11):
-                nonce = bytearray(iv)
-                for i in range(8):
-                    nonce[11 - i] ^= (seq >> (8 * i)) & 0xFF
-                try:
-                    plaintext = aesgcm.decrypt(bytes(nonce), ciphertext, None)
-                    return plaintext.decode("utf-8", errors="replace")
-                except Exception:
-                    continue
-    except ImportError:
-        pass
-    except Exception:
-        pass
-
+def find_tshark() -> str | None:
+    """Find tshark executable."""
+    candidates = [
+        r"C:\Program Files\Wireshark\tshark.exe",
+        r"C:\Program Files (x86)\Wireshark\tshark.exe",
+        "tshark",
+    ]
+    for c in candidates:
+        try:
+            subprocess.run([c, "--version"], capture_output=True, timeout=5)
+            return c
+        except Exception:
+            continue
     return None
+
+
+def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
+    """
+    Write captured packets to a temp pcap, run tshark with the keylog,
+    return a dict of {packet_index: decrypted_http_payload}.
+    """
+    if not os.path.exists(keylog_path):
+        return {}
+
+    tshark = find_tshark()
+    if not tshark:
+        return {}
+
+    try:
+        from scapy.all import wrpcap, Ether, IP, TCP, Raw
+        import struct
+
+        # Write raw packets to temp pcap
+        pcap_path = os.path.join(tempfile.gettempdir(), "babywireshark_capture.pcap")
+        wrpcap(pcap_path, packets)
+
+        # Run tshark to decrypt and extract HTTP2/HTTP data
+        result = subprocess.run([
+            tshark,
+            "-r", pcap_path,
+            "-o", f"tls.keylog_file:{keylog_path}",
+            "-T", "json",
+            "-Y", "http2 or http",
+            "-e", "frame.number",
+            "-e", "http2.data.data",
+            "-e", "http.file_data",
+            "-e", "http2.headers",
+            "-e", "http.request.full_uri",
+            "-e", "http.response.code",
+        ], capture_output=True, text=True, timeout=30)
+
+        print(f"tshark stderr: {result.stderr[:500]}")
+        print(f"tshark stdout length: {len(result.stdout)}")
+        print(f"tshark stdout preview: {result.stdout[:500]}")
+        if not result.stdout.strip():
+            return {}
+
+        data = json.loads(result.stdout)
+        decrypted = {}
+
+        for entry in data:
+            frame_num = int(entry.get("_source", {}).get("layers", {}).get("frame.number", [0])[0]) - 1
+            layers = entry.get("_source", {}).get("layers", {})
+
+            content = ""
+            if "http2.data.data" in layers:
+                hex_data = layers["http2.data.data"]
+                if isinstance(hex_data, list):
+                    hex_data = hex_data[0]
+                try:
+                    content = bytes.fromhex(hex_data.replace(":", "")).decode("utf-8", errors="replace")
+                except Exception:
+                    content = hex_data
+            elif "http.file_data" in layers:
+                content = layers["http.file_data"]
+                if isinstance(content, list):
+                    content = content[0]
+
+            if content:
+                decrypted[frame_num] = content[:2000]
+
+        return decrypted
+
+    except Exception as e:
+        print(f"tshark decryption error: {e}")
+        return {}
