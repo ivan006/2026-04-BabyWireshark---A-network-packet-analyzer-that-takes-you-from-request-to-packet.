@@ -116,7 +116,7 @@ function packetNarrative(pkt) {
   if (flags.indexOf("F") >= 0 && !isFromMe)
     return '"same, I\'m done too" -- FIN';
   if (flags.indexOf("R") >= 0)
-    return '"something went wrong, killing this connection" -- RST';
+    return '"connection closed abruptly -- normal for scripted HTTP clients" -- RST';
   if (t.L7_Application)
     return '"here\'s the data you asked for" -- Application Data';
   return '"just keeping track of where we are" -- TCP control';
@@ -286,6 +286,16 @@ function openModal(idx) {
   new bootstrap.Modal(document.getElementById("pktModal")).show();
 }
 
+function getSender(pkt) {
+  var src = (pkt.layers.L3_Network && pkt.layers.L3_Network.src_ip) || "";
+  var isFromMe =
+    src.indexOf("10.") === 0 ||
+    src.indexOf("192.168.") === 0 ||
+    src.indexOf("172.") === 0;
+  if (isFromMe) return { name: "you", color: "#86efac" };
+  return { name: currentHostname || "server", color: "#67e8f9" };
+}
+
 function addTableRow(pkt, idx) {
   var elapsed = startTime
     ? ((pkt.timestamp - startTime) * 1000).toFixed(1)
@@ -293,6 +303,7 @@ function addTableRow(pkt, idx) {
   var phase = detectPhase(pkt);
   var phaseColor = PHASE_COLORS[phase] || "#aaa";
   var tbody = document.getElementById("packets-tbody");
+  var sender = getSender(pkt);
 
   var tr = document.createElement("tr");
   tr.style.cssText = "cursor:pointer";
@@ -305,6 +316,12 @@ function addTableRow(pkt, idx) {
     '<td class="text-secondary pe-3" style="font-family:monospace;font-size:12px">' +
     (idx + 1) +
     "</td>";
+  html +=
+    '<td class="pe-2"><span style="font-size:11px;font-weight:600;color:' +
+    sender.color +
+    '">' +
+    sender.name +
+    "</span></td>";
   html += '<td class="pe-3">' + protocolStack(pkt.layers) + "</td>";
   html +=
     '<td class="pe-3"><span class="badge" style="background:' +
@@ -357,6 +374,7 @@ function startInspect() {
     var msg = JSON.parse(e.data);
     if (msg.type === "resolved") {
       showResolved(msg.data);
+      currentHostname = msg.data.hostname;
       setStatus(
         "Resolved " + msg.data.hostname + " to " + msg.data.ip,
         "alert-secondary",
