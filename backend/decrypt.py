@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import json
+import time
 
 
 def find_tshark() -> str | None:
@@ -21,10 +22,12 @@ def find_tshark() -> str | None:
 
 def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
     if not os.path.exists(keylog_path):
+        print(f"Keylog not found: {keylog_path}")
         return {}
 
     tshark = find_tshark()
     if not tshark:
+        print("tshark not found")
         return {}
 
     try:
@@ -32,24 +35,38 @@ def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
         pcap_path = os.path.join(tempfile.gettempdir(), "babywireshark_capture.pcap")
         wrpcap(pcap_path, packets)
 
-        # Extract full reassembled HTTP response body
+        # Small delay to ensure keylog is fully written
+        time.sleep(0.5)
+
+        print(f"Keylog size: {os.path.getsize(keylog_path)} bytes")
+        print(f"Pcap size: {os.path.getsize(pcap_path)} bytes")
+
+        # First check what protocols tshark sees with decryption
+        check = subprocess.run([
+            tshark, "-r", pcap_path,
+            "-o", f"tls.keylog_file:{keylog_path}",
+            "-T", "fields",
+            "-e", "frame.number",
+            "-e", "frame.protocols",
+        ], capture_output=True, timeout=30, encoding="utf-8", errors="replace")
+        print(f"Protocols seen:\n{check.stdout[:800]}")
+
+        # Extract HTTP data
         result = subprocess.run([
             tshark,
             "-r", pcap_path,
             "-o", f"tls.keylog_file:{keylog_path}",
             "-T", "json",
             "-e", "frame.number",
-            "-e", "http.response.code",
-            "-e", "http.response_for.uri",
             "-e", "http.file_data",
             "-e", "http2.data.data",
-            "-e", "http.response",
             "-Y", "http.file_data or http2.data.data",
         ], capture_output=True, timeout=30, encoding="utf-8", errors="replace")
 
+        print(f"HTTP extract stdout len: {len(result.stdout)}, stderr: {result.stderr[:300]}")
+
         output = result.stdout.strip()
         if not output:
-            print("tshark returned no HTTP data")
             return {}
 
         data = json.loads(output)
@@ -70,7 +87,6 @@ def decrypt_packets_with_tshark(packets: list, keylog_path: str) -> dict:
                             pass
 
         if not full_response:
-            print("No HTTP body found in tshark output")
             return {}
 
         print(f"Total decrypted: {len(full_response)} chars")
