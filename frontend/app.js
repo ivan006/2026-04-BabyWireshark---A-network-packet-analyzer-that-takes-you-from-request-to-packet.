@@ -38,24 +38,6 @@ wrap.innerHTML = fields.map(([label, value]) => `
 wrap.classList.remove('d-none');
 }
 
-function protocolStack(layers) {
-const parts = [];
-if (layers.L2_DataLink) parts.push({ label: 'eth', color: '#fca5a5' });
-if (layers.L3_Network) parts.push({ label: 'ip', color: '#fcd34d' });
-if (layers.L4_Transport) {
-const proto = (layers.L4_Transport.protocol || 'transport').toLowerCase();
-parts.push({ label: proto, color: '#86efac' });
-}
-if (layers.L5_L6_Session_Presentation) parts.push({ label: 'tls', color: '#67e8f9' });
-if (layers.L7_Application) {
-const proto = (layers.L7_Application.protocol || 'app').toLowerCase().split('/')[0].split(' ')[0];
-parts.push({ label: proto, color: '#a78bfa' });
-}
-return parts
-.map(p => `<span style="font-family:monospace;font-size:12px;font-weight:600;color:${p.color}">${p.label}</span>`)
-.join('<span class="text-secondary" style="font-size:11px;margin:0 3px">:</span>');
-}
-
 function badgesHTML(layers) {
 return LAYERS
 .filter(l => layers[l.key])
@@ -91,7 +73,7 @@ card.innerHTML = `
 <div class="d-flex align-items-center gap-2 px-3 py-2 bg-black bg-opacity-25" style="cursor:pointer"
   onclick="togglePacket('${id}')">
   <span class="text-secondary" style="font-family:monospace;font-size:11px;min-width:32px">#${packetCount}</span>
-  <div class="flex-grow-1">${protocolStack(layers)}</div>
+  <div class="flex-grow-1">${badgesHTML(layers)}</div>
   <span class="text-secondary" style="font-size:11px;font-family:monospace">${elapsed}</span>
   <span class="text-secondary" style="font-size:11px;font-family:monospace">${pkt.size_bytes} B</span>
 </div>
