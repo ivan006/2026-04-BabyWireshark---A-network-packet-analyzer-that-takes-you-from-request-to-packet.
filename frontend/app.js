@@ -277,9 +277,14 @@ function openModal(idx) {
         ">" +
         k +
         "</td>";
+      var safeV = String(v)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
       fields +=
         '<td class="py-1" style="font-family:monospace;font-size:12px;word-break:break-all">' +
-        v +
+        safeV +
         "</td>";
       fields += "</tr>";
     });
