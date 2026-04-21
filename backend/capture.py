@@ -246,8 +246,9 @@ def capture_and_request(resolved: dict, on_packet, on_done, on_patch=None):
                     on_patch(None, full_content)
                 continue
 
-            # Get sizes of each TLS data packet to proportion the content
-            sizes = [captured[i]["size_bytes"] for i in tls_data_packets]
+            # Get payload sizes — subtract Ethernet(14) + IP(20) + TCP(~32) + TLS record header(5) + auth tag(16)
+            OVERHEAD = 14 + 20 + 32 + 5 + 16
+            sizes = [max(1, captured[i]["size_bytes"] - OVERHEAD) for i in tls_data_packets]
             total_size = sum(sizes)
             total_chars = len(full_content)
 
